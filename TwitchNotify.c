@@ -64,8 +64,7 @@
 
 // command id's for popup menu items
 #define CMD_OPEN_HOMEPAGE  10 // "Twitch Notify" item selected
-#define CMD_USE_MPV        20 // "Use mpv" checkbox
-#define CMD_QUALITY        30 // +N for Quality submenu items
+#define CMD_USE_MPC        20 // "Use mpc" checkbox
 #define CMD_EDIT_USERS     40 // "Edit List" in user submenu
 #define CMD_DOWNLOAD_USERS 50 // "Download List" in user submenu
 #define CMD_EXIT           60 // "Exit"
@@ -95,24 +94,6 @@
 
 // Twitch requires to send PING message over websocket at least once per 5 min
 #define TIMER_WEBSOCKET_PING_INTERVAL (2*60*1000) // 2 min in msec
-
-// youtube-dl quality names to use with mpv player
-struct
-{
-	LPCWSTR Name;
-	LPCSTR Format;
-}
-static const Quality[] =
-{
-	{ L"Source",     "best"                              },
-	{ L"1080p @ 60", "best[height<=?1080]/best"          },
-	{ L"1080p",      "best[height<=?1080][fps<=30]/best" },
-	{ L"720p @ 60",  "best[height<=?720]/best"           },
-	{ L"720p",       "best[height<=?720][fps<=?30]/best" },
-	{ L"480p",       "best[height<=?480]/best"           },
-	{ L"360p",       "best[height<=?360]/best"           },
-	{ L"160p",       "best[height<=?160]/best"           },
-};
 
 // message sent when explorer.exe restarts, to restore tray icon
 static uint32_t WM_TASKBARCREATED;
@@ -152,8 +133,7 @@ struct
 	FILETIME LastIniWriteTime;
 
 	// global settings
-	int Quality;
-	bool UseMpv;
+	bool UseMpc;
 
 	// user list
 	User Users[MAX_USER_COUNT];
@@ -228,18 +208,18 @@ static void ShowTrayMessage(HWND Window, DWORD InfoType, LPCWSTR Message)
 	Assert(Shell_NotifyIconW(NIM_MODIFY, &Data));
 }
 
-static bool IsMpvInPath(void)
+static bool IsMpcInPath(void)
 {
-	WCHAR mpv[MAX_PATH];
-	return FindExecutableW(L"mpv.exe", NULL, mpv) > (HINSTANCE)32;
+	WCHAR mpc[MAX_PATH];
+	return FindExecutableW(L"mpc-hc64.exe", NULL, mpc) > (HINSTANCE)32;
 }
 
-static void OpenMpvUrl(LPCWSTR Url)
+static void OpenMpcUrl(LPCWSTR Url)
 {
 	WCHAR Args[1024];
-	wsprintfW(Args, L"--profile=low-latency --ytdl-format=\"%S\" %s", Quality[State.Quality].Format, Url);
+	wsprintfW(Args, L"%s", Url);
 
-	ShellExecuteW(NULL, L"open", L"mpv.exe", Args, NULL, SW_SHOWNORMAL);
+	ShellExecuteW(NULL, L"open", L"mpc-hc64.exe", Args, NULL, SW_SHOWNORMAL);
 }
 
 static void GetTwitchIcon(LPWSTR ImagePath)
@@ -310,7 +290,7 @@ static void ShowUserNotification(User* User)
 		L"<text>{stream}</text>"
 		L"</binding></visual><actions>");
 
-	if (IsMpvInPath())
+	if (IsMpcInPath())
 	{
 		XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, L"<action content=\"Play\" arguments=\"Phttps://www.twitch.tv/");
 		XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, User->Name);
@@ -821,19 +801,10 @@ static void DownloadUserStream(int UserId, int Delay)
 
 static void ShowTrayMenu(HWND Window)
 {
-	bool MpvFound = IsMpvInPath();
+	bool MpcFound = IsMpcInPath();
 	WCHAR username[MAX_STRING_LENGTH];
 
 	bool CanUpdateUsers = GetPrivateProfileStringW(L"twitch", L"username", L"", username, ARRAYSIZE(username), State.IniPath) && username[0];
-
-	HMENU QualityMenu = CreatePopupMenu();
-	Assert(QualityMenu);
-
-	for (int Index = 0; Index < ARRAYSIZE(Quality); Index++)
-	{
-		UINT Flags = State.Quality == Index ? MF_CHECKED : MF_UNCHECKED;
-		AppendMenuW(QualityMenu, Flags, CMD_QUALITY + Index, Quality[Index].Name);
-	}
 
 	HMENU Menu = CreatePopupMenu();
 	Assert(Menu);
@@ -876,8 +847,7 @@ static void ShowTrayMenu(HWND Window)
 
 	AppendMenuW(Menu, MF_SEPARATOR, 0, NULL);
 
-	AppendMenuW(Menu, (State.UseMpv ? MF_CHECKED : MF_STRING) | (MpvFound ? 0 : MF_GRAYED), CMD_USE_MPV, L"mpv Playback");
-	AppendMenuW(Menu, MF_POPUP | (MpvFound ? 0 : MF_GRAYED), (UINT_PTR)QualityMenu, L"mpv Quality");
+	AppendMenuW(Menu, (State.UseMpc ? MF_CHECKED : MF_STRING) | (MpcFound ? 0 : MF_GRAYED), CMD_USE_MPC, L"mpc Playback");
 
 	AppendMenuW(Menu, MF_SEPARATOR, 0, NULL);
 	AppendMenuW(Menu, MF_STRING, CMD_EXIT, L"Exit");
@@ -891,13 +861,9 @@ static void ShowTrayMenu(HWND Window)
 	{
 		ShellExecuteW(NULL, L"open", TWITCH_NOTIFY_HOMEPAGE, NULL, NULL, SW_SHOWNORMAL);
 	}
-	else if (Command == CMD_USE_MPV)
+	else if (Command == CMD_USE_MPC)
 	{
-		State.UseMpv = !State.UseMpv;
-	}
-	else if (Command >= CMD_QUALITY && Command < CMD_QUALITY + ARRAYSIZE(Quality))
-	{
-		State.Quality = Command - CMD_QUALITY;
+		State.UseMpc = !State.UseMpc;
 	}
 	else if (Command == CMD_EDIT_USERS)
 	{
@@ -918,10 +884,10 @@ static void ShowTrayMenu(HWND Window)
 		WCHAR Url[1024];
 		wsprintfW(Url, L"https://www.twitch.tv/%s", User->Name);
 
-		if (State.UseMpv && IsMpvInPath() && User->IsLive)
+		if (State.UseMpc && IsMpcInPath() && User->IsLive)
 		{
-			// use mpv only if mpv is selected, it is available in path, and user is live
-			OpenMpvUrl(Url);
+			// use mpc only if mpc is selected, it is available in path, and user is live
+			OpenMpcUrl(Url);
 		}
 		else
 		{
@@ -931,7 +897,6 @@ static void ShowTrayMenu(HWND Window)
 	}
 
 	DestroyMenu(Menu);
-	DestroyMenu(QualityMenu);
 }
 
 static void CALLBACK DownloadUserStreamInfoWork(PTP_CALLBACK_INSTANCE Instance, PVOID Context, PTP_WORK Work)
@@ -1317,8 +1282,7 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 	if (Message == WM_CREATE)
 	{
 		AddTrayIcon(Window, State.Icon); // initial icon will show up as connected, just to look prettier
-		State.Quality = GetPrivateProfileIntW(L"player", L"quality", 0, State.IniPath);
-		State.UseMpv = GetPrivateProfileIntW(L"player", L"mpv", 1, State.IniPath);
+		State.UseMpc = GetPrivateProfileIntW(L"player", L"mpc", 1, State.IniPath);
 
 		if (GetPrivateProfileIntW(L"twitch", L"autoupdate", 0, State.IniPath) == 0)
 		{
@@ -1334,9 +1298,7 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 	}
 	else if (Message == WM_DESTROY)
 	{
-		WCHAR Str[2] = { L'0' + State.Quality, 0 };
-		WritePrivateProfileStringW(L"player", L"quality", Str, State.IniPath);
-		WritePrivateProfileStringW(L"player", L"mpv", State.UseMpv ? L"1" : L"0", State.IniPath);
+		WritePrivateProfileStringW(L"player", L"mpc", State.UseMpc ? L"1" : L"0", State.IniPath);
 		RemoveTrayIcon(Window);
 		if (State.Websocket)
 		{
@@ -1591,7 +1553,7 @@ static void OnToastActivated(WindowsToast* Toast, void* Item, LPCWSTR Action)
 	if (Action[0] == L'P')
 	{
 		LPCWSTR Url = Action + 1;
-		OpenMpvUrl(Url);
+		OpenMpcUrl(Url);
 	}
 	else if (Action[0] == L'O')
 	{
