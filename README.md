@@ -21,10 +21,7 @@ media player, or Twitch page in browser. You can access all monitored users
 with right click on icon, it will show checkbox next to users that are
 currently live.
 
-~~To use [mpv][] player locally you need to have `mpv.exe` and either [yt-dlp.exe][]
-(recommended) or [youtube-dl.exe][] executables available in PATH.~~
-
-__This fork__ basically changes mpv to mpc-hc. As long as you have `mpc-hc64.exe` and either `yt-dlp` or `youtube-dl` in your `%PATH%` everything should work.
+__This fork__ removes the `mpv` option and will default to opening Twitch in __Firefox__.
 
 # Building
 

@@ -64,7 +64,6 @@
 
 // command id's for popup menu items
 #define CMD_OPEN_HOMEPAGE  10 // "Twitch Notify" item selected
-#define CMD_USE_MPC        20 // "Use mpc" checkbox
 #define CMD_EDIT_USERS     40 // "Edit List" in user submenu
 #define CMD_DOWNLOAD_USERS 50 // "Download List" in user submenu
 #define CMD_EXIT           60 // "Exit"
@@ -131,9 +130,6 @@ struct
 	// for loading & saving .ini file
 	WCHAR IniPath[MAX_PATH];
 	FILETIME LastIniWriteTime;
-
-	// global settings
-	bool UseMpc;
 
 	// user list
 	User Users[MAX_USER_COUNT];
@@ -208,20 +204,6 @@ static void ShowTrayMessage(HWND Window, DWORD InfoType, LPCWSTR Message)
 	Assert(Shell_NotifyIconW(NIM_MODIFY, &Data));
 }
 
-static bool IsMpcInPath(void)
-{
-	WCHAR mpc[MAX_PATH];
-	return FindExecutableW(L"mpc-hc64.exe", NULL, mpc) > (HINSTANCE)32;
-}
-
-static void OpenMpcUrl(LPCWSTR Url)
-{
-	WCHAR Args[1024];
-	wsprintfW(Args, L"%s", Url);
-
-	ShellExecuteW(NULL, L"open", L"mpc-hc64.exe", Args, NULL, SW_SHOWNORMAL);
-}
-
 static void GetTwitchIcon(LPWSTR ImagePath)
 {
 	int TempLength = GetTempPathW(MAX_PATH, ImagePath);
@@ -289,13 +271,6 @@ static void ShowUserNotification(User* User)
 		L"<text>{game}</text>"
 		L"<text>{stream}</text>"
 		L"</binding></visual><actions>");
-
-	if (IsMpcInPath())
-	{
-		XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, L"<action content=\"Play\" arguments=\"Phttps://www.twitch.tv/");
-		XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, User->Name);
-		XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, L"\"/>");
-	}
 
 	XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, L"<action content=\"Open Browser\" arguments=\"Ohttps://www.twitch.tv/");
 	XmlLength = StrCatChainW(Xml, ARRAYSIZE(Xml), XmlLength, User->Name);
@@ -649,7 +624,7 @@ static void LoadUsers(void)
 
 			// no notification is shown initially
 			User->Notification = NULL;
-			
+
 			QuerySize = StrCatChainW(Query, ARRAYSIZE(Query), QuerySize, Delim);
 			QuerySize = StrCatChainW(Query, ARRAYSIZE(Query), QuerySize, L"\\\"");
 			QuerySize = StrCatChainW(Query, ARRAYSIZE(Query), QuerySize, NewUsers[NewIndex]);
@@ -799,9 +774,27 @@ static void DownloadUserStream(int UserId, int Delay)
 	}
 }
 
+static bool LaunchFirefox(WCHAR* url)
+{
+	STARTUPINFOW si;
+	PROCESS_INFORMATION process;
+	DWORD ret;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	ZeroMemory(&process, sizeof(process));
+	WCHAR applicationPath[] = L"C:\\Program Files\\Mozilla Firefox\\firefox.exe";
+	WCHAR commandLine[1024];
+	wsprintfW(commandLine, L"\"%s\" \"%s\"", applicationPath, url);
+	CreateProcessW(NULL, commandLine, NULL, NULL, TRUE, 0, NULL, NULL, &si, &process);
+	WaitForSingleObject(process.hProcess, INFINITE);
+	GetExitCodeProcess(process.hProcess, &ret);
+	CloseHandle(process.hProcess);
+	CloseHandle(process.hThread);
+	return ret;
+}
+
 static void ShowTrayMenu(HWND Window)
 {
-	bool MpcFound = IsMpcInPath();
 	WCHAR username[MAX_STRING_LENGTH];
 
 	bool CanUpdateUsers = GetPrivateProfileStringW(L"twitch", L"username", L"", username, ARRAYSIZE(username), State.IniPath) && username[0];
@@ -847,9 +840,6 @@ static void ShowTrayMenu(HWND Window)
 
 	AppendMenuW(Menu, MF_SEPARATOR, 0, NULL);
 
-	AppendMenuW(Menu, (State.UseMpc ? MF_CHECKED : MF_STRING) | (MpcFound ? 0 : MF_GRAYED), CMD_USE_MPC, L"mpc Playback");
-
-	AppendMenuW(Menu, MF_SEPARATOR, 0, NULL);
 	AppendMenuW(Menu, MF_STRING, CMD_EXIT, L"Exit");
 
 	POINT Mouse;
@@ -860,10 +850,6 @@ static void ShowTrayMenu(HWND Window)
 	if (Command == CMD_OPEN_HOMEPAGE)
 	{
 		ShellExecuteW(NULL, L"open", TWITCH_NOTIFY_HOMEPAGE, NULL, NULL, SW_SHOWNORMAL);
-	}
-	else if (Command == CMD_USE_MPC)
-	{
-		State.UseMpc = !State.UseMpc;
 	}
 	else if (Command == CMD_EDIT_USERS)
 	{
@@ -883,17 +869,7 @@ static void ShowTrayMenu(HWND Window)
 
 		WCHAR Url[1024];
 		wsprintfW(Url, L"https://www.twitch.tv/%s", User->Name);
-
-		if (State.UseMpc && IsMpcInPath() && User->IsLive)
-		{
-			// use mpc only if mpc is selected, it is available in path, and user is live
-			OpenMpcUrl(Url);
-		}
-		else
-		{
-			// otherwise open browser url
-			ShellExecuteW(NULL, L"open", Url, NULL, NULL, SW_SHOWNORMAL);
-		}
+		LaunchFirefox(Url);
 	}
 
 	DestroyMenu(Menu);
@@ -1242,7 +1218,7 @@ static void OnFollowedUsers(JsonObject* Json)
 
 	WCHAR Users[32768];
 	int UsersLength = 0;
-	
+
 	int Count = JsonArray_GetCount(Edges);
 	for (int Index = 0; Index < Count; Index++)
 	{
@@ -1282,7 +1258,6 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 	if (Message == WM_CREATE)
 	{
 		AddTrayIcon(Window, State.Icon); // initial icon will show up as connected, just to look prettier
-		State.UseMpc = GetPrivateProfileIntW(L"player", L"mpc", 1, State.IniPath);
 
 		if (GetPrivateProfileIntW(L"twitch", L"autoupdate", 0, State.IniPath) == 0)
 		{
@@ -1298,7 +1273,6 @@ static LRESULT CALLBACK WindowProc(HWND Window, UINT Message, WPARAM WParam, LPA
 	}
 	else if (Message == WM_DESTROY)
 	{
-		WritePrivateProfileStringW(L"player", L"mpc", State.UseMpc ? L"1" : L"0", State.IniPath);
 		RemoveTrayIcon(Window);
 		if (State.Websocket)
 		{
@@ -1553,7 +1527,6 @@ static void OnToastActivated(WindowsToast* Toast, void* Item, LPCWSTR Action)
 	if (Action[0] == L'P')
 	{
 		LPCWSTR Url = Action + 1;
-		OpenMpcUrl(Url);
 	}
 	else if (Action[0] == L'O')
 	{
