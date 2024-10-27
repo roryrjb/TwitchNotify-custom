@@ -849,7 +849,7 @@ static void ShowTrayMenu(HWND Window)
 	int Command = TrackPopupMenu(Menu, TPM_RETURNCMD | TPM_NONOTIFY, Mouse.x, Mouse.y, 0, Window, NULL);
 	if (Command == CMD_OPEN_HOMEPAGE)
 	{
-		ShellExecuteW(NULL, L"open", TWITCH_NOTIFY_HOMEPAGE, NULL, NULL, SW_SHOWNORMAL);
+		LaunchFirefox(TWITCH_NOTIFY_HOMEPAGE);
 	}
 	else if (Command == CMD_EDIT_USERS)
 	{
@@ -1531,7 +1531,7 @@ static void OnToastActivated(WindowsToast* Toast, void* Item, LPCWSTR Action)
 	else if (Action[0] == L'O')
 	{
 		LPCWSTR Url = Action + 1;
-		ShellExecuteW(NULL, L"open", Url, NULL, NULL, SW_SHOWNORMAL);
+		LaunchFirefox((WCHAR*)Url);
 	}
 	else if (Action[0] == L'E')
 	{
